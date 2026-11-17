@@ -109,6 +109,27 @@ public class MainActivity extends Activity {
         status.setText("আউটপুট যাবে: Downloads/Converter");
         root.addView(status);
         setContentView(sv);
+        handleShare(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleShare(intent);
+    }
+
+    void handleShare(Intent in) {
+        if (in == null) return;
+        String a = in.getAction();
+        if (Intent.ACTION_SEND.equals(a)) {
+            Uri u = in.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (u != null) { picked.clear(); picked.add(u); }
+        } else if (Intent.ACTION_SEND_MULTIPLE.equals(a)) {
+            ArrayList<Uri> l = in.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (l != null) { picked.clear(); picked.addAll(l); }
+        } else return;
+        listView.setText(picked.size() + "টি ফাইল বাছাই হয়েছে");
     }
 
     @Override
