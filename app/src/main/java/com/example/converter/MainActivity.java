@@ -28,7 +28,9 @@ public class MainActivity extends Activity {
     Spinner fmtSpinner, unitSpinner, modeSpinner;
     int mode = 0;
     EditText sizeEdit;
-    Button convertBtn;
+    Button convertBtn, shareBtn;
+    final List<Uri> outUris = new ArrayList<>();
+    final List<String> outMimes = new ArrayList<>();
     ProgressBar bar;
 
     @Override
@@ -108,6 +110,12 @@ public class MainActivity extends Activity {
         status = new TextView(this);
         status.setText("আউটপুট যাবে: Downloads/Converter");
         root.addView(status);
+
+        shareBtn = new Button(this);
+        shareBtn.setText("কনভার্ট হওয়া ফাইল শেয়ার করো");
+        shareBtn.setVisibility(View.GONE);
+        shareBtn.setOnClickListener(v -> shareOutputs());
+        root.addView(shareBtn);
         setContentView(sv);
         handleShare(getIntent());
     }
@@ -138,7 +146,7 @@ public class MainActivity extends Activity {
             }
             if (l != null && !l.isEmpty()) { picked.clear(); picked.addAll(l); }
         } else return;
-        listView.setText(picked.size() + "টি ফাইল বাছাই হয়েছে");
+        showPicked();
     }
 
     @Override
@@ -149,7 +157,14 @@ public class MainActivity extends Activity {
             for (int i = 0; i < data.getClipData().getItemCount(); i++)
                 picked.add(data.getClipData().getItemAt(i).getUri());
         } else if (data.getData() != null) picked.add(data.getData());
-        listView.setText(picked.size() + "টি ফাইল বাছাই হয়েছে");
+        showPicked();
+    }
+
+    void showPicked() {
+        if (picked.isEmpty()) { listView.setText("কোনো ফাইল বাছাই হয়নি"); return; }
+        StringBuilder sb = new StringBuilder(picked.size() + "টি ফাইল বাছাই হয়েছে:");
+        for (Uri u : picked) sb.append("\n• ").append(displayName(u));
+        listView.setText(sb.toString());
     }
 
     void say(String s) { runOnUiThread(() -> status.setText(s)); }
@@ -172,10 +187,46 @@ public class MainActivity extends Activity {
             return;
         }
         convertBtn.setEnabled(false);
+        shareBtn.setVisibility(View.GONE);
+        synchronized (outUris) { outUris.clear(); outMimes.clear(); }
         new Thread(() -> {
             try { run(fmt, tgt); } catch (Throwable e) { say("ভুল: " + e); }
-            runOnUiThread(() -> convertBtn.setEnabled(true));
+            runOnUiThread(() -> {
+                convertBtn.setEnabled(true);
+                synchronized (outUris) {
+                    if (!outUris.isEmpty()) {
+                        shareBtn.setText("শেয়ার করো (" + outUris.size() + "টি ফাইল)");
+                        shareBtn.setVisibility(View.VISIBLE);
+                    }
+                }
+            });
         }).start();
+    }
+
+    void shareOutputs() {
+        final ArrayList<Uri> uris;
+        final List<String> mimes;
+        synchronized (outUris) { uris = new ArrayList<>(outUris); mimes = new ArrayList<>(outMimes); }
+        if (uris.isEmpty()) { Toast.makeText(this, "শেয়ার করার মতো ফাইল নেই", Toast.LENGTH_SHORT).show(); return; }
+        String type = mimes.get(0);
+        for (String m : mimes) if (!m.equals(type)) { type = "*/*"; break; }
+        Intent send;
+        if (uris.size() == 1) {
+            send = new Intent(Intent.ACTION_SEND);
+            send.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+        } else {
+            send = new Intent(Intent.ACTION_SEND_MULTIPLE);
+            send.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+        }
+        send.setType(type);
+        android.content.ClipData cd = android.content.ClipData.newRawUri("converted", uris.get(0));
+        for (int i = 1; i < uris.size(); i++) cd.addItem(new android.content.ClipData.Item(uris.get(i)));
+        send.setClipData(cd);
+        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        Intent chooser = Intent.createChooser(send, "শেয়ার করো");
+        chooser.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS,
+                new android.content.ComponentName[]{new android.content.ComponentName(this, MainActivity.class)});
+        startActivity(chooser);
     }
 
     void run(int fmt, long target) throws Exception {
@@ -259,8 +310,9 @@ public class MainActivity extends Activity {
                     pad += diff;
                 }
             }
-            if (fmt == FMT_PDF) save("converted_" + System.currentTimeMillis() + ".pdf", "application/pdf", out);
-            else save("converted_" + System.currentTimeMillis() + ".docx",
+            String outBase = baseName(uris.get(0)) + (uris.size() > 1 ? "_merged" : "");
+            if (fmt == FMT_PDF) save(outBase + ".pdf", "application/pdf", out);
+            else save(outBase + ".docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document", out);
             say("শেষ! " + (out.length / 1024) + " KB — Downloads/Converter" + sk);
         } else {
@@ -287,7 +339,7 @@ public class MainActivity extends Activity {
         if (mode > 0) out = padTo(out, fmt, target);
         String ext = fmt == FMT_JPG ? "jpg" : fmt == FMT_PNG ? "png" : "webp";
         String mime = fmt == FMT_JPG ? "image/jpeg" : fmt == FMT_PNG ? "image/png" : "image/webp";
-        save(name + "_" + (System.currentTimeMillis() % 100000) + "." + ext, mime, out);
+        save(name + "." + ext, mime, out);
         return 1;
     }
 
@@ -384,7 +436,8 @@ public class MainActivity extends Activity {
         String n = displayName(u);
         int d = n.lastIndexOf('.');
         if (d > 0) n = n.substring(0, d);
-        return n.replaceAll("[^\\p{L}\\p{N}_-]", "_");
+        n = n.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
+        return n.isEmpty() ? "file" : n;
     }
 
     int kind(Uri u) {
@@ -427,7 +480,7 @@ public class MainActivity extends Activity {
         return m;
     }
 
-    void save(String name, String mime, byte[] data) throws IOException {
+    Uri save(String name, String mime, byte[] data) throws IOException {
         ContentValues v = new ContentValues();
         v.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
         v.put(MediaStore.MediaColumns.MIME_TYPE, mime);
@@ -437,6 +490,8 @@ public class MainActivity extends Activity {
         try (OutputStream os = getContentResolver().openOutputStream(out)) {
             os.write(data);
         }
+        synchronized (outUris) { outUris.add(out); outMimes.add(mime); }
+        return out;
     }
 
     // Minimal PDF writer: one JPEG per page, exact size control
