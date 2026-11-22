@@ -124,10 +124,19 @@ public class MainActivity extends Activity {
         String a = in.getAction();
         if (Intent.ACTION_SEND.equals(a)) {
             Uri u = in.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (u == null && in.getClipData() != null && in.getClipData().getItemCount() > 0)
+                u = in.getClipData().getItemAt(0).getUri();
             if (u != null) { picked.clear(); picked.add(u); }
         } else if (Intent.ACTION_SEND_MULTIPLE.equals(a)) {
             ArrayList<Uri> l = in.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
-            if (l != null) { picked.clear(); picked.addAll(l); }
+            if ((l == null || l.isEmpty()) && in.getClipData() != null) {
+                l = new ArrayList<>();
+                for (int i = 0; i < in.getClipData().getItemCount(); i++) {
+                    Uri cu = in.getClipData().getItemAt(i).getUri();
+                    if (cu != null) l.add(cu);
+                }
+            }
+            if (l != null && !l.isEmpty()) { picked.clear(); picked.addAll(l); }
         } else return;
         listView.setText(picked.size() + "টি ফাইল বাছাই হয়েছে");
     }
@@ -237,7 +246,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> bar.setProgress(d));
             }
         }
-        String sk = cnt[2] > 0 ? " (" + cnt[2] + "টি .doc/.xls স্কিপ — শুধু .docx/.xlsx চলে)" : "";
+        String sk = cnt[2] > 0 ? " (" + cnt[2] + "টি অসমর্থিত ফাইল স্কিপ — শুধু ছবি/PDF/.docx/.xlsx চলে)" : "";
         if (bundle) {
             if (pdfJpgs.isEmpty()) { say("কিছু কনভার্ট হয়নি" + sk); return; }
             byte[] out = fmt == FMT_PDF ? buildPdf(pdfJpgs, pdfDims, 0) : buildDocx(pdfJpgs, pdfDims, 0);
@@ -389,8 +398,12 @@ public class MainActivity extends Activity {
             if (t.contains("pdf")) return K_PDF;
             if (t.contains("wordprocessingml")) return K_DOCX;
             if (t.contains("spreadsheetml")) return K_XLSX;
+            if (t.startsWith("image/")) return K_IMG;
         }
-        return K_IMG;
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png") || n.endsWith(".webp")
+                || n.endsWith(".bmp") || n.endsWith(".gif") || n.endsWith(".heic") || n.endsWith(".heif")) return K_IMG;
+        if (t == null) return K_IMG;
+        return K_BAD;
     }
 
     Map<String, byte[]> readZip(Uri u) throws IOException {
