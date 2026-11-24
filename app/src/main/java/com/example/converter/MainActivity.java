@@ -1,6 +1,7 @@
 package com.example.converter;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.database.Cursor;
@@ -12,7 +13,9 @@ import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.View;
 import android.widget.*;
 
@@ -32,6 +35,8 @@ public class MainActivity extends Activity {
     final List<Uri> outUris = new ArrayList<>();
     final List<String> outMimes = new ArrayList<>();
     ProgressBar bar;
+    int[] crop; // {x, y, w, h} in original image pixels, null = no crop
+    TextView cropLabel;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -100,6 +105,26 @@ public class MainActivity extends Activity {
         note.setTextSize(12);
         root.addView(note);
 
+        TextView l4 = new TextView(this);
+        l4.setText("\nক্রপ (শুধু ছবির জন্য, pixel হিসাবে):");
+        root.addView(l4);
+        LinearLayout cropRow = new LinearLayout(this);
+        Button cropBtn = new Button(this);
+        cropBtn.setText("ক্রপ সেট করো");
+        cropBtn.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
+        cropBtn.setOnClickListener(v -> showCropDialog());
+        Button cropClr = new Button(this);
+        cropClr.setText("ক্রপ বাদ দাও");
+        cropClr.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
+        cropClr.setOnClickListener(v -> { crop = null; updateCropLabel(); });
+        cropRow.addView(cropBtn);
+        cropRow.addView(cropClr);
+        root.addView(cropRow);
+        cropLabel = new TextView(this);
+        cropLabel.setTextSize(12);
+        root.addView(cropLabel);
+        updateCropLabel();
+
         convertBtn = new Button(this);
         convertBtn.setText("কনভার্ট করো");
         convertBtn.setOnClickListener(v -> startConvert());
@@ -161,10 +186,158 @@ public class MainActivity extends Activity {
     }
 
     void showPicked() {
+        crop = null;
+        updateCropLabel();
         if (picked.isEmpty()) { listView.setText("কোনো ফাইল বাছাই হয়নি"); return; }
         StringBuilder sb = new StringBuilder(picked.size() + "টি ফাইল বাছাই হয়েছে:");
         for (Uri u : picked) sb.append("\n• ").append(displayName(u));
         listView.setText(sb.toString());
+    }
+
+    int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
+
+    void updateCropLabel() {
+        if (cropLabel == null) return;
+        if (crop == null) cropLabel.setText("ক্রপ: নেই (পুরো ছবি)");
+        else cropLabel.setText("ক্রপ: " + crop[2] + " × " + crop[3] + " px, Position X=" + crop[0] + ", Y=" + crop[1]
+                + "\n(সব ছবিতে এই মাপ প্রয়োগ হবে; ছবির বাইরে গেলে ছবির সীমা পর্যন্ত কাটবে)");
+    }
+
+    EditText numEdit() {
+        EditText e = new EditText(this);
+        e.setInputType(InputType.TYPE_CLASS_NUMBER);
+        e.setSingleLine(true);
+        return e;
+    }
+
+    LinearLayout column(String label, EditText e) {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView t = new TextView(this);
+        t.setText(label);
+        c.addView(t);
+        c.addView(e);
+        return c;
+    }
+
+    void watch(final EditText e, final java.util.function.IntConsumer apply) {
+        e.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            public void afterTextChanged(Editable s) {
+                if (!e.hasFocus()) return;
+                try { apply.accept(Integer.parseInt(s.toString().trim())); } catch (Exception ex) { }
+            }
+        });
+    }
+
+    void showCropDialog() {
+        Uri img = null;
+        for (Uri u : picked) if (kind(u) == K_IMG) { img = u; break; }
+        if (img == null) { Toast.makeText(this, "আগে ছবি বাছাই করো", Toast.LENGTH_SHORT).show(); return; }
+        final int[] sz = new int[2];
+        Bitmap prev;
+        try {
+            prev = ImageDecoder.decodeBitmap(ImageDecoder.createSource(getContentResolver(), img), (dec, info, src) -> {
+                dec.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+                int w = info.getSize().getWidth(), h = info.getSize().getHeight();
+                sz[0] = w; sz[1] = h;
+                int m = Math.max(w, h);
+                if (m > 1600) {
+                    float f = 1600f / m;
+                    dec.setTargetSize(Math.round(w * f), Math.round(h * f));
+                }
+            });
+        } catch (Throwable ex) {
+            Toast.makeText(this, "ছবি লোড হয়নি: " + ex, Toast.LENGTH_LONG).show();
+            return;
+        }
+        int w0 = sz[0], h0 = sz[1];
+        if (w0 != h0 && (w0 > h0) != (prev.getWidth() > prev.getHeight())) { int t = w0; w0 = h0; h0 = t; }
+        final int fw = w0, fh = h0;
+
+        final CropView cv = new CropView(this);
+        cv.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(300)));
+        cv.setImage(prev, fw, fh);
+        if (crop != null) cv.setCrop(crop[0], crop[1], crop[2], crop[3]);
+
+        final EditText eW = numEdit(), eH = numEdit(), eX = numEdit(), eY = numEdit();
+        final Runnable sync = () -> {
+            int[] c = cv.getCrop();
+            if (!eW.hasFocus()) eW.setText(String.valueOf(c[2]));
+            if (!eH.hasFocus()) eH.setText(String.valueOf(c[3]));
+            if (!eX.hasFocus()) eX.setText(String.valueOf(c[0]));
+            if (!eY.hasFocus()) eY.setText(String.valueOf(c[1]));
+        };
+        int[] c0 = cv.getCrop();
+        eW.setText(String.valueOf(c0[2])); eH.setText(String.valueOf(c0[3]));
+        eX.setText(String.valueOf(c0[0])); eY.setText(String.valueOf(c0[1]));
+        watch(eW, v -> cv.setW(v));
+        watch(eH, v -> cv.setH(v));
+        watch(eX, v -> cv.setX(v));
+        watch(eY, v -> cv.setY(v));
+        View.OnFocusChangeListener fix = (v, has) -> { if (!has) sync.run(); };
+        eW.setOnFocusChangeListener(fix); eH.setOnFocusChangeListener(fix);
+        eX.setOnFocusChangeListener(fix); eY.setOnFocusChangeListener(fix);
+        cv.listener = () -> sync.run();
+
+        final String[] names = {"FreeForm", "Original", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"};
+        final float[] ratios = {0f, fw / (float) fh, 1f, 4f / 3f, 3f / 4f, 16f / 9f, 9f / 16f, 3f / 2f, 2f / 3f};
+        Spinner asp = new Spinner(this);
+        asp.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, names));
+        asp.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) { cv.setAspect(ratios[pos]); }
+            public void onNothingSelected(AdapterView<?> p) { }
+        });
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16), dp(8), dp(16), dp(8));
+        box.setFocusable(true);
+        box.setFocusableInTouchMode(true);
+        TextView info = new TextView(this);
+        info.setText("মূল ছবি: " + fw + " × " + fh + " px — ছবির উপর টেনে সরাও, কোণ ধরে মাপ বদলাও");
+        info.setTextSize(12);
+        box.addView(info);
+        box.addView(cv);
+        TextView t1 = new TextView(this);
+        t1.setText("\nCrop Rectangle");
+        t1.setTextSize(16);
+        box.addView(t1);
+        LinearLayout r1 = new LinearLayout(this);
+        r1.addView(column("Width", eW));
+        r1.addView(column("Height", eH));
+        box.addView(r1);
+        TextView t2 = new TextView(this);
+        t2.setText("Aspect Ratio");
+        box.addView(t2);
+        box.addView(asp);
+        TextView t3 = new TextView(this);
+        t3.setText("\nCrop Position");
+        t3.setTextSize(16);
+        box.addView(t3);
+        LinearLayout r2 = new LinearLayout(this);
+        r2.addView(column("Position (X)", eX));
+        r2.addView(column("Position (Y)", eY));
+        box.addView(r2);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(box);
+
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("ক্রপ")
+                .setView(sv)
+                .setPositiveButton("ঠিক আছে", (dlg, w) -> {
+                    int[] c = cv.getCrop();
+                    crop = (c[0] == 0 && c[1] == 0 && c[2] >= fw && c[3] >= fh) ? null : c;
+                    updateCropLabel();
+                })
+                .setNeutralButton("ক্রপ বাদ", (dlg, w) -> { crop = null; updateCropLabel(); })
+                .setNegativeButton("বাতিল", null)
+                .create();
+        d.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        d.show();
+        box.requestFocus();
     }
 
     void say(String s) { runOnUiThread(() -> status.setText(s)); }
@@ -397,16 +570,40 @@ public class MainActivity extends Activity {
     }
 
     Bitmap decode(Uri u) throws IOException {
+        final int[] cr = crop;
+        final int[] info = new int[2];
         ImageDecoder.Source s = ImageDecoder.createSource(getContentResolver(), u);
-        return ImageDecoder.decodeBitmap(s, (dec, info, src) -> {
+        Bitmap bm = ImageDecoder.decodeBitmap(s, (dec, inf, src) -> {
             dec.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
-            int w = info.getSize().getWidth(), h = info.getSize().getHeight();
+            int w = inf.getSize().getWidth(), h = inf.getSize().getHeight();
+            info[0] = w; info[1] = h;
             int m = Math.max(w, h);
-            if (m > 4096) {
-                float f = 4096f / m;
-                dec.setTargetSize(Math.round(w * f), Math.round(h * f));
+            float f = 1f;
+            if (cr == null) {
+                if (m > 4096) f = 4096f / m;
+            } else {
+                // keep full detail inside the crop area (max 4096 px on the cropped side)
+                f = Math.min(1f, 4096f / Math.max(1, Math.max(cr[2], cr[3])));
+                f = Math.min(f, 6000f / m);
             }
+            if (f < 1f) dec.setTargetSize(Math.max(1, Math.round(w * f)), Math.max(1, Math.round(h * f)));
         });
+        if (cr == null) return bm;
+        int ow = info[0], oh = info[1];
+        int bw = bm.getWidth(), bh = bm.getHeight();
+        if (ow != oh && (ow > oh) != (bw > bh)) { int t = ow; ow = oh; oh = t; }
+        double sx = bw / (double) ow, sy = bh / (double) oh;
+        int x = Math.max(0, Math.min(cr[0], ow - 1));
+        int y = Math.max(0, Math.min(cr[1], oh - 1));
+        int w = Math.max(1, Math.min(cr[2], ow - x));
+        int h = Math.max(1, Math.min(cr[3], oh - y));
+        int px = Math.min(bw - 1, (int) Math.round(x * sx));
+        int py = Math.min(bh - 1, (int) Math.round(y * sy));
+        int pw = Math.max(1, Math.min(bw - px, (int) Math.round(w * sx)));
+        int ph = Math.max(1, Math.min(bh - py, (int) Math.round(h * sy)));
+        Bitmap out = Bitmap.createBitmap(bm, px, py, pw, ph);
+        if (out != bm) bm.recycle();
+        return out;
     }
 
     boolean isPdf(Uri u) {
