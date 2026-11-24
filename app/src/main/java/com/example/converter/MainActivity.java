@@ -37,6 +37,10 @@ public class MainActivity extends Activity {
     ProgressBar bar;
     int[] crop; // {x, y, w, h} in original image pixels, null = no crop
     TextView cropLabel;
+    EditText outWEdit, outHEdit;
+    CheckBox keepRatio;
+    int outPxW, outPxH;
+    boolean keepRatioOn = true;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -124,6 +128,22 @@ public class MainActivity extends Activity {
         cropLabel.setTextSize(12);
         root.addView(cropLabel);
         updateCropLabel();
+
+        TextView l5 = new TextView(this);
+        l5.setText("\nআউটপুট ছবির সাইজ (pixel) — খালি রাখলে যেমন আছে তেমন:");
+        root.addView(l5);
+        LinearLayout pxRow = new LinearLayout(this);
+        outWEdit = numEdit();
+        outWEdit.setHint("Width px");
+        outHEdit = numEdit();
+        outHEdit.setHint("Height px");
+        pxRow.addView(column("Width", outWEdit));
+        pxRow.addView(column("Height", outHEdit));
+        root.addView(pxRow);
+        keepRatio = new CheckBox(this);
+        keepRatio.setText("Aspect ratio ঠিক রাখো (একটা দিলে অন্যটা নিজে হবে)");
+        keepRatio.setChecked(true);
+        root.addView(keepRatio);
 
         convertBtn = new Button(this);
         convertBtn.setText("কনভার্ট করো");
@@ -345,6 +365,9 @@ public class MainActivity extends Activity {
     void startConvert() {
         if (picked.isEmpty()) { Toast.makeText(this, "আগে ফাইল বাছাই করো", Toast.LENGTH_SHORT).show(); return; }
         final int fmt = fmtSpinner.getSelectedItemPosition();
+        outPxW = parsePx(outWEdit);
+        outPxH = parsePx(outHEdit);
+        keepRatioOn = keepRatio.isChecked();
         long target = 0;
         String t = sizeEdit.getText().toString().trim();
         if (!t.isEmpty()) {
@@ -464,7 +487,7 @@ public class MainActivity extends Activity {
                 DocRender.render(readZip(u), kd == K_XLSX, sink, false);
             } else {
                 say("প্রসেস হচ্ছে: " + base);
-                Bitmap bm = decode(u);
+                Bitmap bm = resizePx(decode(u));
                 cnt[0] += emit(bm, fmt, perPage, base, pdfJpgs, pdfDims);
                 final int d = ++cnt[1];
                 runOnUiThread(() -> bar.setProgress(d));
@@ -604,6 +627,35 @@ public class MainActivity extends Activity {
         Bitmap out = Bitmap.createBitmap(bm, px, py, pw, ph);
         if (out != bm) bm.recycle();
         return out;
+    }
+
+    int parsePx(EditText e) {
+        try {
+            int v = Integer.parseInt(e.getText().toString().trim());
+            return Math.max(0, Math.min(v, 12000));
+        } catch (Exception ex) { return 0; }
+    }
+
+    Bitmap resizePx(Bitmap b) {
+        int tw = outPxW, th = outPxH;
+        if (tw <= 0 && th <= 0) return b;
+        int w = b.getWidth(), h = b.getHeight();
+        int nw, nh;
+        if (tw > 0 && th > 0) {
+            if (keepRatioOn) {
+                double f = Math.min(tw / (double) w, th / (double) h);
+                nw = (int) Math.round(w * f); nh = (int) Math.round(h * f);
+            } else { nw = tw; nh = th; }
+        } else if (tw > 0) {
+            nw = tw; nh = keepRatioOn ? (int) Math.round(h * (tw / (double) w)) : h;
+        } else {
+            nh = th; nw = keepRatioOn ? (int) Math.round(w * (th / (double) h)) : w;
+        }
+        nw = Math.max(1, nw); nh = Math.max(1, nh);
+        if (nw == w && nh == h) return b;
+        Bitmap o = Bitmap.createScaledBitmap(b, nw, nh, true);
+        if (o != b) b.recycle();
+        return o;
     }
 
     boolean isPdf(Uri u) {
