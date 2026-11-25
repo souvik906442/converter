@@ -47,6 +47,8 @@ public class MainActivity extends Activity {
     CheckBox keepRatio;
     int outPxW, outPxH;
     boolean keepRatioOn = true;
+    int origW, origH; // base size shown in pixel fields (first image, after crop/rotate)
+    boolean pxUpdating = false;
 
     static final int ACCENT = 0xFFFFD166;
 
@@ -166,7 +168,7 @@ public class MainActivity extends Activity {
         // --- Output pixel card
         LinearLayout c5 = card();
         c5.addView(section("📐 আউটপুট ছবির সাইজ (pixel)"));
-        c5.addView(body("খালি রাখলে ছবি যেমন আছে তেমনই থাকবে", 12));
+        c5.addView(body("অরিজিনাল pixel দেখানো আছে — বদলালে বদলাবে, রিসেট চাপলে আবার অরিজিনাল", 12));
         LinearLayout pxRow = new LinearLayout(this);
         outWEdit = numEdit();
         outWEdit.setHint("Width px");
@@ -182,16 +184,13 @@ public class MainActivity extends Activity {
         keepRatio.setButtonTintList(ColorStateList.valueOf(ACCENT));
         keepRatio.setChecked(true);
         c5.addView(keepRatio);
-        Button pxClr = btn("পিক্সেল বাদ দাও", 0x33FFFFFF, 0x33FFFFFF);
+        Button pxClr = btn("রিসেট (অরিজিনাল পিক্সেল)", 0x33FFFFFF, 0x33FFFFFF);
         LinearLayout.LayoutParams lpx = new LinearLayout.LayoutParams(-1, -2);
         lpx.topMargin = dp(8);
         pxClr.setLayoutParams(lpx);
-        pxClr.setOnClickListener(v -> {
-            outWEdit.setText("");
-            outHEdit.setText("");
-            outPxW = 0;
-            outPxH = 0;
-        });
+        pxClr.setOnClickListener(v -> setPxFields(origW, origH));
+        outWEdit.addTextChangedListener(ratioWatcher(true));
+        outHEdit.addTextChangedListener(ratioWatcher(false));
         c5.addView(pxClr);
         root.addView(c5);
 
@@ -305,6 +304,50 @@ public class MainActivity extends Activity {
 
     int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
+    void setPxFields(int w, int h) {
+        pxUpdating = true;
+        outWEdit.setText(w > 0 ? String.valueOf(w) : "");
+        outHEdit.setText(h > 0 ? String.valueOf(h) : "");
+        pxUpdating = false;
+    }
+
+    TextWatcher ratioWatcher(final boolean isW) {
+        return new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            public void afterTextChanged(Editable s) {
+                if (pxUpdating || origW <= 0 || origH <= 0 || !keepRatio.isChecked()) return;
+                try {
+                    int v = Integer.parseInt(s.toString().trim());
+                    pxUpdating = true;
+                    if (isW) outHEdit.setText(String.valueOf(Math.max(1, (int) Math.round(v * origH / (double) origW))));
+                    else outWEdit.setText(String.valueOf(Math.max(1, (int) Math.round(v * origW / (double) origH))));
+                } catch (Exception ex) {
+                    // empty/invalid: leave the other field alone
+                } finally { pxUpdating = false; }
+            }
+        };
+    }
+
+    /** Shows the original (or cropped/rotated) pixel size of the first image in the output fields. */
+    void refreshPxFields() {
+        if (outWEdit == null) return;
+        int w = 0, h = 0;
+        for (Uri u : picked) if (kind(u) == K_IMG) {
+            int[] d = imageSize(u);
+            if (d != null) { w = d[0]; h = d[1]; }
+            break;
+        }
+        if (w > 0 && crop != null) { w = crop[2]; h = crop[3]; }
+        else if (w > 0) {
+            int rot = 0;
+            for (int op : ops) if (op == 0) rot++;
+            if (rot % 2 == 1) { int t = w; w = h; h = t; }
+        }
+        origW = w; origH = h;
+        setPxFields(w, h);
+    }
+
     void updateCropLabel() {
         if (cropLabel == null) return;
         StringBuilder sb = new StringBuilder();
@@ -314,6 +357,7 @@ public class MainActivity extends Activity {
                 .append("\n(সব ছবিতে এই মাপ প্রয়োগ হবে; ছবির বাইরে গেলে ছবির সীমা পর্যন্ত কাটবে)");
         if (!ops.isEmpty()) sb.append("\nঘোরানো/ফ্লিপ প্রয়োগ করা আছে (").append(ops.size()).append(" ধাপ)");
         cropLabel.setText(sb.toString());
+        refreshPxFields();
     }
 
     GradientDrawable rounded(int fill, int stroke, int strokeDp, int radiusDp) {
@@ -609,6 +653,7 @@ public class MainActivity extends Activity {
         final int fmt = fmtSpinner.getSelectedItemPosition();
         outPxW = parsePx(outWEdit);
         outPxH = parsePx(outHEdit);
+        if (outPxW == origW && outPxH == origH) { outPxW = 0; outPxH = 0; } // untouched = keep original
         keepRatioOn = keepRatio.isChecked();
         long target = 0;
         String t = sizeEdit.getText().toString().trim();
