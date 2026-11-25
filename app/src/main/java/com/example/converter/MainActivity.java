@@ -41,7 +41,7 @@ public class MainActivity extends Activity {
     final List<String> outMimes = new ArrayList<>();
     ProgressBar bar;
     int[] crop; // {x, y, w, h} in (rotated) image pixels, null = no crop
-    int rotation; // clockwise quarter turns 0..3, applied before crop
+    final ArrayList<Integer> ops = new ArrayList<>(); // transforms applied before crop: 0 = rotate 90 CW, 1 = flip horizontal, 2 = flip vertical
     TextView cropLabel;
     EditText outWEdit, outHEdit;
     CheckBox keepRatio;
@@ -153,7 +153,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams lpb = new LinearLayout.LayoutParams(0, -2, 1f);
         lpb.leftMargin = dp(6);
         cropClr.setLayoutParams(lpb);
-        cropClr.setOnClickListener(v -> { crop = null; rotation = 0; updateCropLabel(); });
+        cropClr.setOnClickListener(v -> { crop = null; ops.clear(); updateCropLabel(); });
         cropRow.addView(cropBtn);
         cropRow.addView(cropClr);
         c4.addView(cropRow);
@@ -263,7 +263,7 @@ public class MainActivity extends Activity {
 
     void showPicked() {
         crop = null;
-        rotation = 0;
+        ops.clear();
         updateCropLabel();
         if (picked.isEmpty()) { listView.setText("কোনো ফাইল বাছাই হয়নি"); return; }
         StringBuilder sb = new StringBuilder(picked.size() + "টি ফাইল বাছাই হয়েছে:");
@@ -312,7 +312,7 @@ public class MainActivity extends Activity {
         else sb.append("ক্রপ: ").append(crop[2]).append(" × ").append(crop[3]).append(" px, Position X=")
                 .append(crop[0]).append(", Y=").append(crop[1])
                 .append("\n(সব ছবিতে এই মাপ প্রয়োগ হবে; ছবির বাইরে গেলে ছবির সীমা পর্যন্ত কাটবে)");
-        if (rotation != 0) sb.append("\nঘোরানো: ").append(rotation * 90).append("° (ঘড়ির কাঁটার দিকে)");
+        if (!ops.isEmpty()) sb.append("\nঘোরানো/ফ্লিপ প্রয়োগ করা আছে (").append(ops.size()).append(" ধাপ)");
         cropLabel.setText(sb.toString());
     }
 
@@ -475,8 +475,8 @@ public class MainActivity extends Activity {
         final CropView cv = new CropView(this);
         cv.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(300)));
         cv.setImage(prev, fw, fh);
-        final int[] rotState = {rotation};
-        for (int i = 0; i < rotation; i++) cv.rotateCW();
+        final ArrayList<Integer> dOps = new ArrayList<>(ops);
+        for (int op : dOps) cv.apply(op);
         if (crop != null) cv.setCrop(crop[0], crop[1], crop[2], crop[3]);
 
         final EditText eW = numEdit(), eH = numEdit(), eX = numEdit(), eY = numEdit();
@@ -520,25 +520,39 @@ public class MainActivity extends Activity {
         box.addView(dTitle);
         TextView info = new TextView(this);
         final Runnable updInfo = () -> info.setText("ছবি: " + cv.iw + " × " + cv.ih + " px"
-                + (rotState[0] != 0 ? " (ঘোরানো " + rotState[0] * 90 + "°)" : "")
+                + (!dOps.isEmpty() ? " (ঘোরানো/ফ্লিপ: " + dOps.size() + " ধাপ)" : "")
                 + " — ছবির উপর টেনে সরাও, কোণ ধরে মাপ বদলাও");
         updInfo.run();
         info.setTextSize(12);
         box.addView(info);
         box.addView(cv);
-        Button rotBtn = btn("🔄 Rotate (৯০°)", 0xFF00C6FF, 0xFF0072FF);
-        LinearLayout.LayoutParams lpr = new LinearLayout.LayoutParams(-1, -2);
-        lpr.topMargin = dp(8);
-        rotBtn.setLayoutParams(lpr);
-        rotBtn.setOnClickListener(v -> {
-            cv.rotateCW();
-            rotState[0] = (rotState[0] + 1) % 4;
-            ratios[1] = cv.iw / (float) cv.ih;
-            int sel = asp.getSelectedItemPosition();
-            if (sel > 0) cv.setAspect(ratios[sel]);
-            updInfo.run();
-        });
-        box.addView(rotBtn);
+        LinearLayout tools = new LinearLayout(this);
+        LinearLayout.LayoutParams lpt = new LinearLayout.LayoutParams(-1, -2);
+        lpt.topMargin = dp(8);
+        tools.setLayoutParams(lpt);
+        String[] tn = {"🔄 Rotate", "↔ Flip", "↕ Vertical"};
+        for (int k = 0; k < 3; k++) {
+            final int op = k;
+            Button tb = btn(tn[k], k == 0 ? 0xFF00C6FF : (k == 1 ? 0xFF8E2DE2 : 0xFFFF512F),
+                    k == 0 ? 0xFF0072FF : (k == 1 ? 0xFFE100FF : 0xFFF09819));
+            tb.setTextSize(13);
+            tb.setPadding(dp(4), dp(10), dp(4), dp(10));
+            LinearLayout.LayoutParams lpb2 = new LinearLayout.LayoutParams(0, -2, 1f);
+            lpb2.setMargins(dp(3), 0, dp(3), 0);
+            tb.setLayoutParams(lpb2);
+            tb.setOnClickListener(v -> {
+                cv.apply(op);
+                dOps.add(op);
+                if (op == 0) {
+                    ratios[1] = cv.iw / (float) cv.ih;
+                    int sel = asp.getSelectedItemPosition();
+                    if (sel > 0) cv.setAspect(ratios[sel]);
+                }
+                updInfo.run();
+            });
+            tools.addView(tb);
+        }
+        box.addView(tools);
         TextView t1 = new TextView(this);
         t1.setText("\nCrop Rectangle");
         t1.setTextSize(16);
@@ -571,10 +585,11 @@ public class MainActivity extends Activity {
                 .setPositiveButton("ঠিক আছে", (dlg, w) -> {
                     int[] c = cv.getCrop();
                     crop = (c[0] == 0 && c[1] == 0 && c[2] >= cv.iw && c[3] >= cv.ih) ? null : c;
-                    rotation = rotState[0];
+                    ops.clear();
+                    ops.addAll(dOps);
                     updateCropLabel();
                 })
-                .setNeutralButton("ক্রপ বাদ", (dlg, w) -> { crop = null; rotation = 0; updateCropLabel(); })
+                .setNeutralButton("ক্রপ বাদ", (dlg, w) -> { crop = null; ops.clear(); updateCropLabel(); })
                 .setNegativeButton("বাতিল", null)
                 .create();
         d.getWindow().setBackgroundDrawable(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
@@ -821,7 +836,7 @@ public class MainActivity extends Activity {
 
     Bitmap decode(Uri u) throws IOException {
         final int[] cr = crop;
-        final int rot = rotation;
+        final ArrayList<Integer> tops = new ArrayList<>(ops);
         final int[] info = new int[2];
         ImageDecoder.Source s = ImageDecoder.createSource(getContentResolver(), u);
         Bitmap bm = ImageDecoder.decodeBitmap(s, (dec, inf, src) -> {
@@ -842,13 +857,18 @@ public class MainActivity extends Activity {
         int ow = info[0], oh = info[1];
         int bw = bm.getWidth(), bh = bm.getHeight();
         if (ow != oh && (ow > oh) != (bw > bh)) { int t = ow; ow = oh; oh = t; }
-        if (rot != 0) {
+        if (!tops.isEmpty()) {
             Matrix mx = new Matrix();
-            mx.postRotate(rot * 90f);
+            int turns = 0;
+            for (int op : tops) {
+                if (op == 0) { mx.postRotate(90f); turns++; }
+                else if (op == 1) mx.postScale(-1f, 1f);
+                else if (op == 2) mx.postScale(1f, -1f);
+            }
             Bitmap r = Bitmap.createBitmap(bm, 0, 0, bw, bh, mx, true);
             if (r != bm) bm.recycle();
             bm = r;
-            if (rot % 2 == 1) { int t = ow; ow = oh; oh = t; }
+            if (turns % 2 == 1) { int t = ow; ow = oh; oh = t; }
             bw = bm.getWidth(); bh = bm.getHeight();
         }
         if (cr == null) return bm;

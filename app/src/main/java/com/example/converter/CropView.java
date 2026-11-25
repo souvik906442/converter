@@ -70,6 +70,33 @@ public class CropView extends View {
         changed();
     }
 
+    /** Mirror the preview left-right; the crop rectangle mirrors with it. */
+    public void flipH() {
+        if (bmp == null) return;
+        Matrix m = new Matrix();
+        m.postScale(-1f, 1f);
+        bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
+        cx = clamp(iw - (cx + cw), 0, iw - cw);
+        changed();
+    }
+
+    /** Mirror the preview top-bottom; the crop rectangle mirrors with it. */
+    public void flipV() {
+        if (bmp == null) return;
+        Matrix m = new Matrix();
+        m.postScale(1f, -1f);
+        bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
+        cy = clamp(ih - (cy + ch), 0, ih - ch);
+        changed();
+    }
+
+    /** 0 = rotate 90 clockwise, 1 = flip horizontal, 2 = flip vertical. */
+    public void apply(int op) {
+        if (op == 0) rotateCW();
+        else if (op == 1) flipH();
+        else if (op == 2) flipV();
+    }
+
     public int[] getCrop() {
         return new int[]{Math.round(cx), Math.round(cy), Math.round(cw), Math.round(ch)};
     }
