@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.view.MotionEvent;
@@ -50,6 +51,23 @@ public class CropView extends View {
         ih = Math.max(1, h);
         cx = 0; cy = 0; cw = iw; ch = ih;
         invalidate();
+    }
+
+    /** Rotate the preview image 90 degrees clockwise; the crop rectangle rotates with it. */
+    public void rotateCW() {
+        if (bmp == null) return;
+        Matrix m = new Matrix();
+        m.postRotate(90);
+        bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
+        float ox = cx, oy = cy, ow = cw, oh = ch;
+        int oiw = iw, oih = ih;
+        iw = oih;
+        ih = oiw;
+        cw = oh;
+        ch = ow;
+        cx = clamp(oih - (oy + oh), 0, iw - cw);
+        cy = clamp(ox, 0, ih - ch);
+        changed();
     }
 
     public int[] getCrop() {
