@@ -2,6 +2,11 @@ package com.example.converter;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.res.ColorStateList;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.view.Gravity;
+import android.view.ViewGroup;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.database.Cursor;
@@ -42,23 +47,51 @@ public class MainActivity extends Activity {
     int outPxW, outPxH;
     boolean keepRatioOn = true;
 
+    static final int ACCENT = 0xFFFFD166;
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        int p = (int) (16 * getResources().getDisplayMetrics().density);
+        if (getActionBar() != null) getActionBar().hide();
+        getWindow().setStatusBarColor(0xFF1A1446);
+        getWindow().setNavigationBarColor(0xFF0B3A8C);
+        getWindow().getDecorView().setSystemUiVisibility(0);
+
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{0xFF1A1446, 0xFF5B1FA8, 0xFF0B6FD6}));
+        FrameLayout.LayoutParams o1 = new FrameLayout.LayoutParams(dp(300), dp(300), Gravity.TOP | Gravity.END);
+        o1.topMargin = dp(-40); o1.rightMargin = dp(-90);
+        frame.addView(orb(0xFFFF4D8D, 300), o1);
+        FrameLayout.LayoutParams o2 = new FrameLayout.LayoutParams(dp(320), dp(320), Gravity.CENTER_VERTICAL | Gravity.START);
+        o2.leftMargin = dp(-140);
+        frame.addView(orb(0xFF00E5FF, 320), o2);
+        FrameLayout.LayoutParams o3 = new FrameLayout.LayoutParams(dp(280), dp(280), Gravity.BOTTOM | Gravity.END);
+        o3.bottomMargin = dp(-60); o3.rightMargin = dp(-60);
+        frame.addView(orb(0xFFFFA000, 280), o3);
+
         ScrollView sv = new ScrollView(this);
+        sv.setBackgroundColor(Color.TRANSPARENT);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(p, p * 2, p, p);
+        root.setPadding(dp(16), dp(20), dp(16), dp(28));
         sv.addView(root);
+        frame.addView(sv, new FrameLayout.LayoutParams(-1, -1));
 
         TextView title = new TextView(this);
         title.setText("Offline Converter");
-        title.setTextSize(24);
+        title.setTextSize(28);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(Color.WHITE);
         root.addView(title);
+        TextView sub = body("ছবি • PDF • DOCX • Excel কনভার্টার", 13);
+        sub.setPadding(0, 0, 0, dp(16));
+        root.addView(sub);
 
-        Button pick = new Button(this);
-        pick.setText("ফাইল বাছাই করো (ছবি / PDF / DOCX / Excel)");
+        // --- File card
+        LinearLayout c1 = card();
+        c1.addView(section("📁 ফাইল"));
+        Button pick = btn("ফাইল বাছাই করো (ছবি / PDF / DOCX / Excel)", 0xFF00C6FF, 0xFF0072FF);
         pick.setOnClickListener(v -> {
             Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             i.addCategory(Intent.CATEGORY_OPENABLE);
@@ -67,71 +100,72 @@ public class MainActivity extends Activity {
             i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
             startActivityForResult(i, 1);
         });
-        root.addView(pick);
+        c1.addView(pick);
+        listView = body("কোনো ফাইল বাছাই হয়নি", 14);
+        listView.setPadding(0, dp(10), 0, 0);
+        c1.addView(listView);
+        root.addView(c1);
 
-        listView = new TextView(this);
-        listView.setText("কোনো ফাইল বাছাই হয়নি");
-        root.addView(listView);
-
-        TextView l1 = new TextView(this);
-        l1.setText("\nআউটপুট ফরম্যাট:");
-        root.addView(l1);
+        // --- Format card
+        LinearLayout c2 = card();
+        c2.addView(section("🖼️ আউটপুট ফরম্যাট"));
         fmtSpinner = new Spinner(this);
-        fmtSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item,
-                new String[]{"JPG", "PNG", "WebP", "PDF (সব মিলিয়ে একটা)", "DOCX (সব মিলিয়ে একটা)"}));
-        root.addView(fmtSpinner);
+        styleSpinner(fmtSpinner, new String[]{"JPG", "PNG", "WebP", "PDF (সব মিলিয়ে একটা)", "DOCX (সব মিলিয়ে একটা)"});
+        c2.addView(fmtSpinner);
+        root.addView(c2);
 
-        TextView l2 = new TextView(this);
-        l2.setText("\nসাইজ লিমিট (খালি রাখলে লিমিট নেই):");
-        root.addView(l2);
+        // --- Size card
+        LinearLayout c3 = card();
+        c3.addView(section("📦 সাইজ লিমিট (খালি রাখলে লিমিট নেই)"));
         LinearLayout row = new LinearLayout(this);
-        sizeEdit = new EditText(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        sizeEdit = numEdit();
         sizeEdit.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         sizeEdit.setHint("যেমন 20");
         sizeEdit.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
         unitSpinner = new Spinner(this);
-        unitSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item,
-                new String[]{"KB", "MB"}));
+        styleSpinner(unitSpinner, new String[]{"KB", "MB"});
         row.addView(sizeEdit);
         row.addView(unitSpinner);
-        root.addView(row);
-
-        TextView l3 = new TextView(this);
-        l3.setText("\nসাইজ মোড:");
-        root.addView(l3);
+        c3.addView(row);
+        TextView l3 = body("সাইজ মোড", 13);
+        l3.setPadding(0, dp(12), 0, 0);
+        c3.addView(l3);
         modeSpinner = new Spinner(this);
-        modeSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item,
-                new String[]{"ছোট করো (এই সাইজের মধ্যে)", "বড় করো (কমপক্ষে এই সাইজ)", "ঠিক এই সাইজ (ছোট/বড় দুটোই)"}));
-        root.addView(modeSpinner);
+        styleSpinner(modeSpinner, new String[]{"ছোট করো (এই সাইজের মধ্যে)", "বড় করো (কমপক্ষে এই সাইজ)", "ঠিক এই সাইজ (ছোট/বড় দুটোই)"});
+        c3.addView(modeSpinner);
+        TextView note = body("প্রতিটি আউটপুট ফাইল (PDF/DOCX হলে পুরো ফাইল) এই সাইজ ধরে হবে। \"বড় করো\" মোডে ফাইলে অতিরিক্ত ডেটা যোগ হয় — ছবির কোয়ালিটি বাড়ে না।", 12);
+        note.setPadding(0, dp(8), 0, 0);
+        c3.addView(note);
+        root.addView(c3);
 
-        TextView note = new TextView(this);
-        note.setText("প্রতিটি আউটপুট ফাইল (PDF/DOCX হলে পুরো ফাইল) এই সাইজ ধরে হবে। \"বড় করো\" মোডে ফাইলে অতিরিক্ত ডেটা যোগ হয় — ছবির কোয়ালিটি বাড়ে না।");
-        note.setTextSize(12);
-        root.addView(note);
-
-        TextView l4 = new TextView(this);
-        l4.setText("\nক্রপ (শুধু ছবির জন্য, pixel হিসাবে):");
-        root.addView(l4);
+        // --- Crop card
+        LinearLayout c4 = card();
+        c4.addView(section("✂️ ক্রপ (শুধু ছবির জন্য, pixel হিসাবে)"));
         LinearLayout cropRow = new LinearLayout(this);
-        Button cropBtn = new Button(this);
-        cropBtn.setText("ক্রপ সেট করো");
-        cropBtn.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
+        Button cropBtn = btn("ক্রপ সেট করো", 0xFF8E2DE2, 0xFFE100FF);
+        LinearLayout.LayoutParams lpa = new LinearLayout.LayoutParams(0, -2, 1f);
+        lpa.rightMargin = dp(6);
+        cropBtn.setLayoutParams(lpa);
         cropBtn.setOnClickListener(v -> showCropDialog());
-        Button cropClr = new Button(this);
-        cropClr.setText("ক্রপ বাদ দাও");
-        cropClr.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
+        Button cropClr = btn("ক্রপ বাদ দাও", 0x33FFFFFF, 0x33FFFFFF);
+        LinearLayout.LayoutParams lpb = new LinearLayout.LayoutParams(0, -2, 1f);
+        lpb.leftMargin = dp(6);
+        cropClr.setLayoutParams(lpb);
         cropClr.setOnClickListener(v -> { crop = null; updateCropLabel(); });
         cropRow.addView(cropBtn);
         cropRow.addView(cropClr);
-        root.addView(cropRow);
-        cropLabel = new TextView(this);
-        cropLabel.setTextSize(12);
-        root.addView(cropLabel);
+        c4.addView(cropRow);
+        cropLabel = body("", 12);
+        cropLabel.setPadding(0, dp(8), 0, 0);
+        c4.addView(cropLabel);
         updateCropLabel();
+        root.addView(c4);
 
-        TextView l5 = new TextView(this);
-        l5.setText("\nআউটপুট ছবির সাইজ (pixel) — খালি রাখলে যেমন আছে তেমন:");
-        root.addView(l5);
+        // --- Output pixel card
+        LinearLayout c5 = card();
+        c5.addView(section("📐 আউটপুট ছবির সাইজ (pixel)"));
+        c5.addView(body("খালি রাখলে ছবি যেমন আছে তেমনই থাকবে", 12));
         LinearLayout pxRow = new LinearLayout(this);
         outWEdit = numEdit();
         outWEdit.setHint("Width px");
@@ -139,29 +173,50 @@ public class MainActivity extends Activity {
         outHEdit.setHint("Height px");
         pxRow.addView(column("Width", outWEdit));
         pxRow.addView(column("Height", outHEdit));
-        root.addView(pxRow);
+        c5.addView(pxRow);
         keepRatio = new CheckBox(this);
         keepRatio.setText("Aspect ratio ঠিক রাখো (একটা দিলে অন্যটা নিজে হবে)");
+        keepRatio.setTextColor(Color.WHITE);
+        keepRatio.setTextSize(13);
+        keepRatio.setButtonTintList(ColorStateList.valueOf(ACCENT));
         keepRatio.setChecked(true);
-        root.addView(keepRatio);
+        c5.addView(keepRatio);
+        Button pxClr = btn("পিক্সেল বাদ দাও", 0x33FFFFFF, 0x33FFFFFF);
+        LinearLayout.LayoutParams lpx = new LinearLayout.LayoutParams(-1, -2);
+        lpx.topMargin = dp(8);
+        pxClr.setLayoutParams(lpx);
+        pxClr.setOnClickListener(v -> {
+            outWEdit.setText("");
+            outHEdit.setText("");
+            outPxW = 0;
+            outPxH = 0;
+        });
+        c5.addView(pxClr);
+        root.addView(c5);
 
-        convertBtn = new Button(this);
-        convertBtn.setText("কনভার্ট করো");
+        convertBtn = btn("কনভার্ট করো", 0xFFFF512F, 0xFFF09819);
+        convertBtn.setTextSize(17);
         convertBtn.setOnClickListener(v -> startConvert());
         root.addView(convertBtn);
 
         bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setProgressTintList(ColorStateList.valueOf(ACCENT));
+        bar.setProgressBackgroundTintList(ColorStateList.valueOf(0x44FFFFFF));
+        LinearLayout.LayoutParams lpbar = new LinearLayout.LayoutParams(-1, -2);
+        lpbar.topMargin = dp(12);
+        bar.setLayoutParams(lpbar);
         root.addView(bar);
-        status = new TextView(this);
-        status.setText("আউটপুট যাবে: Downloads/Converter");
+        status = body("আউটপুট যাবে: Downloads/Converter", 13);
         root.addView(status);
 
-        shareBtn = new Button(this);
-        shareBtn.setText("কনভার্ট হওয়া ফাইল শেয়ার করো");
+        shareBtn = btn("কনভার্ট হওয়া ফাইল শেয়ার করো", 0xFF11998E, 0xFF38EF7D);
         shareBtn.setVisibility(View.GONE);
         shareBtn.setOnClickListener(v -> shareOutputs());
+        LinearLayout.LayoutParams lps = new LinearLayout.LayoutParams(-1, -2);
+        lps.topMargin = dp(10);
+        shareBtn.setLayoutParams(lps);
         root.addView(shareBtn);
-        setContentView(sv);
+        setContentView(frame);
         handleShare(getIntent());
     }
 
@@ -210,8 +265,40 @@ public class MainActivity extends Activity {
         updateCropLabel();
         if (picked.isEmpty()) { listView.setText("কোনো ফাইল বাছাই হয়নি"); return; }
         StringBuilder sb = new StringBuilder(picked.size() + "টি ফাইল বাছাই হয়েছে:");
-        for (Uri u : picked) sb.append("\n• ").append(displayName(u));
+        for (Uri u : picked) {
+            sb.append("\n• ").append(displayName(u));
+            if (kind(u) == K_IMG) {
+                int[] d = imageSize(u);
+                if (d != null) sb.append("  —  ").append(d[0]).append(" × ").append(d[1]).append(" px");
+            }
+        }
         listView.setText(sb.toString());
+    }
+
+    /** Image pixel size (width, height) with EXIF rotation applied, or null if unknown. */
+    int[] imageSize(Uri u) {
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            try (InputStream in = getContentResolver().openInputStream(u)) {
+                BitmapFactory.decodeStream(in, null, o);
+            }
+            int w = o.outWidth, h = o.outHeight;
+            if (w <= 0 || h <= 0) return null;
+            try (InputStream in2 = getContentResolver().openInputStream(u)) {
+                int ori = new android.media.ExifInterface(in2).getAttributeInt(
+                        android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL);
+                if (ori == android.media.ExifInterface.ORIENTATION_ROTATE_90
+                        || ori == android.media.ExifInterface.ORIENTATION_ROTATE_270
+                        || ori == android.media.ExifInterface.ORIENTATION_TRANSPOSE
+                        || ori == android.media.ExifInterface.ORIENTATION_TRANSVERSE) {
+                    int t = w; w = h; h = t;
+                }
+            } catch (Exception ignore) { }
+            return new int[]{w, h};
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     int dp(int v) { return Math.round(v * getResources().getDisplayMetrics().density); }
@@ -223,19 +310,121 @@ public class MainActivity extends Activity {
                 + "\n(সব ছবিতে এই মাপ প্রয়োগ হবে; ছবির বাইরে গেলে ছবির সীমা পর্যন্ত কাটবে)");
     }
 
+    GradientDrawable rounded(int fill, int stroke, int strokeDp, int radiusDp) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(fill);
+        g.setCornerRadius(dp(radiusDp));
+        if (strokeDp > 0) g.setStroke(dp(strokeDp), stroke);
+        return g;
+    }
+
+    View orb(int color, int sizeDp) {
+        View v = new View(this);
+        GradientDrawable g = new GradientDrawable();
+        g.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        g.setGradientRadius(dp(sizeDp) / 2f);
+        g.setColors(new int[]{(color & 0x00FFFFFF) | 0xB0000000, color & 0x00FFFFFF});
+        v.setBackground(g);
+        return v;
+    }
+
+    LinearLayout card() {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setPadding(dp(16), dp(14), dp(16), dp(16));
+        c.setBackground(rounded(0x30FFFFFF, 0x66FFFFFF, 1, 22));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(14);
+        c.setLayoutParams(lp);
+        return c;
+    }
+
+    TextView section(String t) {
+        TextView v = new TextView(this);
+        v.setText(t);
+        v.setTextSize(15);
+        v.setTypeface(Typeface.DEFAULT_BOLD);
+        v.setTextColor(ACCENT);
+        v.setPadding(0, 0, 0, dp(8));
+        return v;
+    }
+
+    TextView body(String t, int sp) {
+        TextView v = new TextView(this);
+        v.setText(t);
+        v.setTextSize(sp);
+        v.setTextColor(0xDDFFFFFF);
+        return v;
+    }
+
+    Button btn(String t, int c1, int c2) {
+        Button b = new Button(this);
+        b.setText(t);
+        b.setAllCaps(false);
+        b.setTextColor(Color.WHITE);
+        b.setTextSize(15);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setStateListAnimator(null);
+        b.setPadding(dp(12), dp(12), dp(12), dp(12));
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[]{c1, c2});
+        g.setCornerRadius(dp(16));
+        g.setStroke(dp(1), 0x55FFFFFF);
+        b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x55FFFFFF), g, rounded(0xFFFFFFFF, 0, 0, 16)));
+        return b;
+    }
+
+    void styleSpinner(Spinner sp, String[] items) {
+        sp.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, items) {
+            @Override
+            public View getView(int pos, View cv, ViewGroup parent) {
+                TextView t = (TextView) super.getView(pos, cv, parent);
+                t.setTextColor(Color.WHITE);
+                t.setTextSize(15);
+                return t;
+            }
+
+            @Override
+            public View getDropDownView(int pos, View cv, ViewGroup parent) {
+                TextView t = (TextView) super.getDropDownView(pos, cv, parent);
+                t.setTextColor(Color.WHITE);
+                t.setBackgroundColor(Color.TRANSPARENT);
+                t.setPadding(dp(16), dp(12), dp(16), dp(12));
+                return t;
+            }
+        });
+        sp.setBackgroundTintList(ColorStateList.valueOf(0xFFFFFFFF));
+        sp.setPopupBackgroundDrawable(rounded(0xF02A2468, 0x66FFFFFF, 1, 14));
+    }
+
+    void darken(View v) {
+        if (v instanceof EditText || v instanceof Button) return;
+        if (v instanceof TextView) { ((TextView) v).setTextColor(0xDDFFFFFF); return; }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) darken(g.getChildAt(i));
+        }
+    }
+
     EditText numEdit() {
         EditText e = new EditText(this);
         e.setInputType(InputType.TYPE_CLASS_NUMBER);
         e.setSingleLine(true);
+        e.setTextColor(Color.WHITE);
+        e.setHintTextColor(0x88FFFFFF);
+        e.setTextSize(16);
+        e.setBackground(rounded(0x26FFFFFF, 0x55FFFFFF, 1, 12));
+        e.setPadding(dp(12), dp(10), dp(12), dp(10));
         return e;
     }
 
     LinearLayout column(String label, EditText e) {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
-        c.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
-        TextView t = new TextView(this);
-        t.setText(label);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
+        lp.setMargins(dp(4), dp(6), dp(4), dp(6));
+        c.setLayoutParams(lp);
+        TextView t = body(label, 13);
+        t.setPadding(0, 0, 0, dp(4));
         c.addView(t);
         c.addView(e);
         return c;
@@ -305,7 +494,7 @@ public class MainActivity extends Activity {
         final String[] names = {"FreeForm", "Original", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"};
         final float[] ratios = {0f, fw / (float) fh, 1f, 4f / 3f, 3f / 4f, 16f / 9f, 9f / 16f, 3f / 2f, 2f / 3f};
         Spinner asp = new Spinner(this);
-        asp.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, names));
+        styleSpinner(asp, names);
         asp.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> p, View v, int pos, long id) { cv.setAspect(ratios[pos]); }
             public void onNothingSelected(AdapterView<?> p) { }
@@ -316,6 +505,11 @@ public class MainActivity extends Activity {
         box.setPadding(dp(16), dp(8), dp(16), dp(8));
         box.setFocusable(true);
         box.setFocusableInTouchMode(true);
+        TextView dTitle = new TextView(this);
+        dTitle.setText("✂️ ক্রপ");
+        dTitle.setTextSize(20);
+        dTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        box.addView(dTitle);
         TextView info = new TextView(this);
         info.setText("মূল ছবি: " + fw + " × " + fh + " px — ছবির উপর টেনে সরাও, কোণ ধরে মাপ বদলাও");
         info.setTextSize(12);
@@ -341,11 +535,14 @@ public class MainActivity extends Activity {
         r2.addView(column("Position (X)", eX));
         r2.addView(column("Position (Y)", eY));
         box.addView(r2);
+        darken(box);
+        dTitle.setTextColor(ACCENT);
+        t1.setTextColor(ACCENT);
+        t3.setTextColor(ACCENT);
         ScrollView sv = new ScrollView(this);
         sv.addView(box);
 
         AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("ক্রপ")
                 .setView(sv)
                 .setPositiveButton("ঠিক আছে", (dlg, w) -> {
                     int[] c = cv.getCrop();
@@ -355,8 +552,13 @@ public class MainActivity extends Activity {
                 .setNeutralButton("ক্রপ বাদ", (dlg, w) -> { crop = null; updateCropLabel(); })
                 .setNegativeButton("বাতিল", null)
                 .create();
+        d.getWindow().setBackgroundDrawable(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{0xFF2A1B6B, 0xFF5B1FA8, 0xFF0B5FC0}) {{ setCornerRadius(dp(24)); setStroke(dp(1), 0x66FFFFFF); }});
         d.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         d.show();
+        d.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(ACCENT);
+        d.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(0xFFFFFFFF);
+        d.getButton(AlertDialog.BUTTON_NEUTRAL).setTextColor(0xFFFFFFFF);
         box.requestFocus();
     }
 
