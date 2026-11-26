@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.DashPathEffect;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
@@ -24,6 +25,8 @@ public class PassportCropView extends View {
     private final Paint bmpPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Paint shade = new Paint();
     private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint guide = new Paint(Paint.ANTI_ALIAS_FLAG);   // মাঝখানের গাইড লাইন
+    private final Paint guideOval = new Paint(Paint.ANTI_ALIAS_FLAG); // মাথার গাইড
 
     private float lastX, lastY;
     private boolean dragging;
@@ -35,6 +38,14 @@ public class PassportCropView extends View {
         border.setColor(Color.WHITE);
         border.setStyle(Paint.Style.STROKE);
         border.setStrokeWidth(4f);
+        guide.setColor(0xCCFFE066);
+        guide.setStyle(Paint.Style.STROKE);
+        guide.setStrokeWidth(2.5f);
+        guide.setPathEffect(new DashPathEffect(new float[]{18f, 12f}, 0f));
+        guideOval.setColor(0x99FFFFFF);
+        guideOval.setStyle(Paint.Style.STROKE);
+        guideOval.setStrokeWidth(2.5f);
+        guideOval.setPathEffect(new DashPathEffect(new float[]{10f, 10f}, 0f));
         scaleDetector = new ScaleGestureDetector(c, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override
             public boolean onScale(ScaleGestureDetector d) {
@@ -177,6 +188,25 @@ public class PassportCropView extends View {
         canvas.drawRect(0, frame.top, frame.left, frame.bottom, shade);
         canvas.drawRect(frame.right, frame.top, w, frame.bottom, shade);
         canvas.drawRect(frame, border);
+        drawGuides(canvas);
+    }
+
+    /** মুখ ঠিক মাঝে আছে কিনা বোঝার জন্য গাইড: মাঝের লাইন, চোখের লাইন, মাথার ডিম্বাকার, চিবুকের লাইন */
+    private void drawGuides(Canvas canvas) {
+        float cx = frame.centerX();
+        // মাঝখানের খাড়া লাইন (নাক/থুতনি এর ওপর থাকা উচিত)
+        canvas.drawLine(cx, frame.top, cx, frame.bottom, guide);
+        // চোখের লাইন (ফ্রেমের উচ্চতার ~42%)
+        float eyeY = frame.top + frame.height() * 0.42f;
+        canvas.drawLine(frame.left, eyeY, frame.right, eyeY, guide);
+        // চিবুকের লাইন (~82%)
+        float chinY = frame.top + frame.height() * 0.82f;
+        canvas.drawLine(frame.left + frame.width() * 0.25f, chinY, frame.right - frame.width() * 0.25f, chinY, guide);
+        // মাথা-কাঁধের জন্য ডিম্বাকার গাইড
+        RectF oval = new RectF(
+                cx - frame.width() * 0.30f, frame.top + frame.height() * 0.10f,
+                cx + frame.width() * 0.30f, frame.top + frame.height() * 0.82f);
+        canvas.drawOval(oval, guideOval);
     }
 
     /** ফ্রেমের ভেতরের অংশ outW x outH পিক্সেলে কেটে দেয় */
