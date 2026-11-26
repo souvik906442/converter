@@ -181,13 +181,23 @@ public class PassportCropView extends View {
 
     /** ফ্রেমের ভেতরের অংশ outW x outH পিক্সেলে কেটে দেয় */
     public Bitmap getCrop(int outW, int outH) {
-        if (bmp == null) return null;
+        return render(bmp, outW, outH);
+    }
+
+    /** মূল ছবির সাথে একই অনুপাতের আরেকটা bitmap (যেমন mask) একই জায়গা থেকে কাটে */
+    public Bitmap getCropOf(Bitmap other, int outW, int outH) {
+        return render(other, outW, outH);
+    }
+
+    private Bitmap render(Bitmap src, int outW, int outH) {
+        if (bmp == null || src == null) return null;
         Bitmap out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
         c.drawColor(Color.WHITE);
         c.scale(outW / frame.width(), outH / frame.height());
         c.translate(-frame.left, -frame.top);
-        c.drawBitmap(bmp, imgMatrix, bmpPaint);
+        c.concat(imgMatrix);
+        c.drawBitmap(src, null, new RectF(0, 0, bmp.getWidth(), bmp.getHeight()), bmpPaint);
         return out;
     }
 }

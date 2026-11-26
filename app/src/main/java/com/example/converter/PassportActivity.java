@@ -24,6 +24,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -57,6 +58,10 @@ public class PassportActivity extends Activity {
     boolean is35 = true, sky = false;
     int copies = 21;
     Segmenter segmenter;
+    Bitmap srcMask;           // পুরো ছবির mask (grayscale)
+    boolean segRunning, segFailed, pendingCrop;
+    int segGen = 0;
+    int edge = 50;            // 0..100, কিনারা কতটা ভেতরে টানবে
 
     @Override
     protected void onCreate(Bundle b) {
@@ -166,6 +171,24 @@ public class PassportActivity extends Activity {
             refreshResult();
         }));
 
+        TextView l3 = body("কিনারা ঠিক করো (পুরোনো ব্যাকগ্রাউন্ডের দাগ থাকলে ডানে, চুল/কাঁধ কাটা গেলে বামে)", 12);
+        l3.setPadding(0, dp(12), 0, dp(2));
+        resultCard.addView(l3);
+        SeekBar edgeBar = new SeekBar(this);
+        edgeBar.setMax(100);
+        edgeBar.setProgress(edge);
+        edgeBar.setProgressTintList(ColorStateList.valueOf(ACCENT));
+        edgeBar.setThumbTintList(ColorStateList.valueOf(ACCENT));
+        edgeBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int p, boolean user) { }
+            @Override public void onStartTrackingTouch(SeekBar sb) { }
+            @Override public void onStopTrackingTouch(SeekBar sb) {
+                edge = sb.getProgress();
+                refreshResult();
+            }
+        });
+        resultCard.addView(edgeBar);
+
         TextView l2 = body("A4 শিটে কপির সংখ্যা", 13);
         l2.setPadding(0, dp(12), 0, dp(6));
         resultCard.addView(l2);
@@ -251,38 +274,83 @@ public class PassportActivity extends Activity {
             cropView.setAspect(photoW(), photoH());
             hint.setVisibility(View.GONE);
             resultCard.setVisibility(View.GONE);
+            startSegmentation(bmp);
         } catch (Exception e) {
             toast("ছবি খোলা যায়নি");
         }
     }
 
     // ---------- ক্রপ + ব্যাকগ্রাউন্ড আলাদা ----------
+    /** ছবি বাছাই করলেই পুরো ছবিতে ব্যাকগ্রাউন্ড আলাদা করা শুরু (মডেল পুরো মানুষটাকে দেখতে পায়, তাই ভালো হয়) */
+    void startSegmentation(final Bitmap bmp) {
+        srcMask = null;
+        segFailed = false;
+        segRunning = true;
+        pendingCrop = false;
+        final int gen = ++segGen;
+        spin.setVisibility(View.VISIBLE);
+        int m = Math.max(bmp.getWidth(), bmp.getHeight());
+        final Bitmap small = (m > 1024)
+                ? Bitmap.createScaledBitmap(bmp, Math.round(bmp.getWidth() * 1024f / m),
+                        Math.round(bmp.getHeight() * 1024f / m), true)
+                : bmp;
+        segmenter.process(InputImage.fromBitmap(small, 0))
+                .addOnSuccessListener(mk -> {
+                    if (gen != segGen) return;
+                    ByteBuffer bb = mk.getBuffer();
+                    bb.rewind();
+                    FloatBuffer fb = bb.asFloatBuffer();
+                    int mw = mk.getWidth(), mh = mk.getHeight();
+                    int n = mw * mh;
+                    float[] arr = new float[n];
+                    fb.get(arr, 0, Math.min(n, fb.remaining()));
+                    int[] px = new int[n];
+                    for (int i = 0; i < n; i++) {
+                        int g = Math.round(Math.max(0f, Math.min(1f, arr[i])) * 255f);
+                        px[i] = 0xFF000000 | (g << 16) | (g << 8) | g;
+                    }
+                    srcMask = Bitmap.createBitmap(px, mw, mh, Bitmap.Config.ARGB_8888);
+                    segRunning = false;
+                    spin.setVisibility(View.GONE);
+                    if (pendingCrop) onCrop();
+                })
+                .addOnFailureListener(e -> {
+                    if (gen != segGen) return;
+                    segFailed = true;
+                    segRunning = false;
+                    spin.setVisibility(View.GONE);
+                    toast("ব্যাকগ্রাউন্ড আলাদা করা যায়নি, শুধু ক্রপ হবে");
+                    if (pendingCrop) onCrop();
+                });
+    }
+
     void onCrop() {
         if (source == null) {
             toast("আগে ছবি বাছাই করো");
             return;
         }
-        final Bitmap bmp = cropView.getCrop(photoW(), photoH());
+        if (segRunning) {
+            pendingCrop = true;
+            spin.setVisibility(View.VISIBLE);
+            toast("একটু অপেক্ষা করো, ব্যাকগ্রাউন্ড বিশ্লেষণ চলছে");
+            return;
+        }
+        pendingCrop = false;
+        int w = photoW(), h = photoH();
+        Bitmap bmp = cropView.getCrop(w, h);
         if (bmp == null) return;
         cropped = bmp;
-        spin.setVisibility(View.VISIBLE);
-        cropBtn.setEnabled(false);
-        segmenter.process(InputImage.fromBitmap(bmp, 0))
-                .addOnSuccessListener(m -> {
-                    ByteBuffer bb = m.getBuffer();
-                    bb.rewind();
-                    FloatBuffer fb = bb.asFloatBuffer();
-                    int n = m.getWidth() * m.getHeight();
-                    float[] arr = new float[n];
-                    fb.get(arr, 0, Math.min(n, fb.remaining()));
-                    mask = resizeMask(arr, m.getWidth(), m.getHeight(), bmp.getWidth(), bmp.getHeight());
-                    cropDone();
-                })
-                .addOnFailureListener(e -> {
-                    mask = null;
-                    toast("ব্যাকগ্রাউন্ড আলাদা করা যায়নি, শুধু ক্রপ হয়েছে");
-                    cropDone();
-                });
+        mask = null;
+        if (srcMask != null) {
+            Bitmap mb = cropView.getCropOf(srcMask, w, h);
+            if (mb != null) {
+                int[] px = new int[w * h];
+                mb.getPixels(px, 0, w, 0, 0, w, h);
+                mask = new float[w * h];
+                for (int i = 0; i < px.length; i++) mask[i] = ((px[i] >> 16) & 0xFF) / 255f;
+            }
+        }
+        cropDone();
     }
 
     void cropDone() {
@@ -318,8 +386,9 @@ public class PassportActivity extends Activity {
         int[] px = new int[w * h];
         fg.getPixels(px, 0, w, 0, 0, w, h);
         int br = Color.red(bg), bgG = Color.green(bg), bb = Color.blue(bg);
+        float lo = 0.2f + 0.6f * edge / 100f;
         for (int i = 0; i < px.length; i++) {
-            float a = (mk[i] - 0.35f) / 0.4f;
+            float a = (mk[i] - lo) / 0.3f;
             a = Math.max(0f, Math.min(1f, a));
             a = a * a * (3f - 2f * a);   // কিনারা একটু মসৃণ
             int p = px[i];
