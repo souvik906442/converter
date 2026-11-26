@@ -80,6 +80,7 @@ public class MainActivity extends Activity {
         root.setPadding(dp(16), dp(20), dp(16), dp(28));
         sv.addView(root);
         frame.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(TabBar.make(this, 0));
 
         TextView title = new TextView(this);
         title.setText("Offline Converter");

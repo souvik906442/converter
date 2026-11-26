@@ -14,3 +14,7 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 }
+dependencies {
+    // পাসপোর্ট ট্যাবের অফলাইন ব্যাকগ্রাউন্ড রিমুভ (মডেল অ্যাপের ভেতরেই থাকে)
+    implementation 'com.google.mlkit:segmentation-selfie:16.0.0-beta5'
+}
