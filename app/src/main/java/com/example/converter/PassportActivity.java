@@ -5,6 +5,7 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ImageDecoder;
@@ -19,6 +20,7 @@ import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -33,7 +35,13 @@ import com.google.mlkit.vision.segmentation.Segmentation;
 import com.google.mlkit.vision.segmentation.Segmenter;
 import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.function.IntConsumer;
@@ -62,6 +70,10 @@ public class PassportActivity extends Activity {
     boolean segRunning, segFailed, pendingCrop;
     int segGen = 0;
     int edge = 50;            // 0..100, কিনারা কতটা ভেতরে টানবে
+    boolean online = false;   // true হলে remove.bg API
+    boolean maskIsAlpha = false;
+    EditText keyEdit;
+    LinearLayout keyBox;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -72,6 +84,7 @@ public class PassportActivity extends Activity {
 
         segmenter = Segmentation.getClient(new SelfieSegmenterOptions.Builder()
                 .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE).build());
+        online = getSharedPreferences("pp", MODE_PRIVATE).getBoolean("online", false);
 
         FrameLayout frame = new FrameLayout(this);
         frame.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
@@ -145,6 +158,25 @@ public class PassportActivity extends Activity {
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, dp(440));
         blp.topMargin = dp(10);
         c3.addView(box, blp);
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(-1, -2);
+        mlp.topMargin = dp(10);
+        c3.addView(seg("অফলাইন (ফোনে)", "অনলাইন (remove.bg)", online ? 1 : 0, idx -> {
+            online = (idx == 1);
+            keyBox.setVisibility(online ? View.VISIBLE : View.GONE);
+            getSharedPreferences("pp", MODE_PRIVATE).edit().putBoolean("online", online).apply();
+        }), mlp);
+        keyBox = new LinearLayout(this);
+        keyBox.setOrientation(LinearLayout.VERTICAL);
+        keyEdit = new EditText(this);
+        keyEdit.setHint("remove.bg API key");
+        keyEdit.setSingleLine(true);
+        keyEdit.setTextColor(Color.WHITE);
+        keyEdit.setHintTextColor(0x88FFFFFF);
+        keyEdit.setText(getSharedPreferences("pp", MODE_PRIVATE).getString("key", ""));
+        keyBox.addView(keyEdit);
+        keyBox.addView(body("remove.bg/api থেকে ফ্রি key নাও (মাসে ৫০টা)। ইন্টারনেট লাগবে।", 12));
+        keyBox.setVisibility(online ? View.VISIBLE : View.GONE);
+        c3.addView(keyBox);
         cropBtn = btn("ক্রপ করো ➜ ব্যাকগ্রাউন্ড বদলাও", 0xFF8E2DE2, 0xFFE100FF);
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(-1, -2);
         clp.topMargin = dp(10);
@@ -171,7 +203,7 @@ public class PassportActivity extends Activity {
             refreshResult();
         }));
 
-        TextView l3 = body("কিনারা ঠিক করো (পুরোনো ব্যাকগ্রাউন্ডের দাগ থাকলে ডানে, চুল/কাঁধ কাটা গেলে বামে)", 12);
+        TextView l3 = body("কিনারা ঠিক করো — শুধু অফলাইন মোডে (দাগ থাকলে ডানে, চুল/কাঁধ কাটা গেলে বামে)", 12);
         l3.setPadding(0, dp(12), 0, dp(2));
         resultCard.addView(l3);
         SeekBar edgeBar = new SeekBar(this);
@@ -274,7 +306,13 @@ public class PassportActivity extends Activity {
             cropView.setAspect(photoW(), photoH());
             hint.setVisibility(View.GONE);
             resultCard.setVisibility(View.GONE);
-            startSegmentation(bmp);
+            srcMask = null;
+            segFailed = false;
+            segRunning = false;
+            pendingCrop = false;
+            segGen++;
+            spin.setVisibility(View.GONE);
+            if (!online) startSegmentation(bmp);
         } catch (Exception e) {
             toast("ছবি খোলা যায়নি");
         }
@@ -329,6 +367,15 @@ public class PassportActivity extends Activity {
             toast("আগে ছবি বাছাই করো");
             return;
         }
+        if (online) {
+            onlineCrop();
+            return;
+        }
+        if (!segRunning && srcMask == null && !segFailed) {
+            startSegmentation(source);
+            pendingCrop = true;
+            return;
+        }
         if (segRunning) {
             pendingCrop = true;
             spin.setVisibility(View.VISIBLE);
@@ -341,6 +388,7 @@ public class PassportActivity extends Activity {
         if (bmp == null) return;
         cropped = bmp;
         mask = null;
+        maskIsAlpha = false;
         if (srcMask != null) {
             Bitmap mb = cropView.getCropOf(srcMask, w, h);
             if (mb != null) {
@@ -351,6 +399,93 @@ public class PassportActivity extends Activity {
             }
         }
         cropDone();
+    }
+
+    // ---------- অনলাইন (remove.bg) ----------
+    void onlineCrop() {
+        final String key = keyEdit.getText().toString().trim();
+        if (key.isEmpty()) {
+            toast("আগে remove.bg API key বসাও");
+            return;
+        }
+        getSharedPreferences("pp", MODE_PRIVATE).edit().putString("key", key).apply();
+        final Bitmap bmp = cropView.getCrop(photoW(), photoH());
+        if (bmp == null) return;
+        spin.setVisibility(View.VISIBLE);
+        cropBtn.setEnabled(false);
+        new Thread(() -> {
+            float[] m = null;
+            String err = null;
+            try {
+                m = removeBgMask(bmp, key);
+            } catch (Exception e) {
+                err = (e.getMessage() != null) ? e.getMessage() : e.getClass().getSimpleName();
+            }
+            final float[] fm = m;
+            final String fe = err;
+            runOnUiThread(() -> {
+                spin.setVisibility(View.GONE);
+                cropBtn.setEnabled(true);
+                if (fm == null) {
+                    toast("অনলাইন ব্যর্থ: " + fe);
+                    return;
+                }
+                cropped = bmp;
+                mask = fm;
+                maskIsAlpha = true;
+                cropDone();
+            });
+        }).start();
+    }
+
+    /** ক্রপ করা ছবি remove.bg-তে পাঠিয়ে alpha থেকে mask বানায় */
+    float[] removeBgMask(Bitmap bmp, String key) throws Exception {
+        ByteArrayOutputStream jb = new ByteArrayOutputStream();
+        bmp.compress(Bitmap.CompressFormat.JPEG, 95, jb);
+        byte[] jpg = jb.toByteArray();
+        String boundary = "----pp" + System.currentTimeMillis();
+        String nl = "\r\n";
+        HttpURLConnection con = (HttpURLConnection) new URL("https://api.remove.bg/v1.0/removebg").openConnection();
+        con.setConnectTimeout(20000);
+        con.setReadTimeout(60000);
+        con.setDoOutput(true);
+        con.setRequestMethod("POST");
+        con.setRequestProperty("X-Api-Key", key);
+        con.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+        try (OutputStream os = con.getOutputStream()) {
+            os.write(("--" + boundary + nl + "Content-Disposition: form-data; name=\"size\"" + nl + nl + "auto" + nl).getBytes("UTF-8"));
+            os.write(("--" + boundary + nl + "Content-Disposition: form-data; name=\"format\"" + nl + nl + "png" + nl).getBytes("UTF-8"));
+            os.write(("--" + boundary + nl + "Content-Disposition: form-data; name=\"image_file\"; filename=\"photo.jpg\"" + nl
+                    + "Content-Type: image/jpeg" + nl + nl).getBytes("UTF-8"));
+            os.write(jpg);
+            os.write((nl + "--" + boundary + "--" + nl).getBytes("UTF-8"));
+        }
+        int code = con.getResponseCode();
+        if (code != 200) {
+            String body = new String(readBytes(con.getErrorStream()), "UTF-8");
+            Matcher mt = Pattern.compile("\"title\"\\s*:\\s*\"([^\"]*)\"").matcher(body);
+            throw new Exception("HTTP " + code + (mt.find() ? ": " + mt.group(1) : ""));
+        }
+        byte[] png = readBytes(con.getInputStream());
+        Bitmap res = BitmapFactory.decodeByteArray(png, 0, png.length);
+        if (res == null) throw new Exception("রেজাল্ট পড়া যায়নি");
+        int w = bmp.getWidth(), h = bmp.getHeight();
+        if (res.getWidth() != w || res.getHeight() != h) res = Bitmap.createScaledBitmap(res, w, h, true);
+        int[] px = new int[w * h];
+        res.getPixels(px, 0, w, 0, 0, w, h);
+        float[] m = new float[w * h];
+        for (int i = 0; i < px.length; i++) m[i] = ((px[i] >>> 24) & 0xFF) / 255f;
+        return m;
+    }
+
+    byte[] readBytes(InputStream is) throws Exception {
+        if (is == null) return new byte[0];
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = is.read(buf)) > 0) bo.write(buf, 0, n);
+        is.close();
+        return bo.toByteArray();
     }
 
     void cropDone() {
@@ -388,9 +523,9 @@ public class PassportActivity extends Activity {
         int br = Color.red(bg), bgG = Color.green(bg), bb = Color.blue(bg);
         float lo = 0.2f + 0.6f * edge / 100f;
         for (int i = 0; i < px.length; i++) {
-            float a = (mk[i] - lo) / 0.3f;
+            float a = maskIsAlpha ? mk[i] : (mk[i] - lo) / 0.3f;
             a = Math.max(0f, Math.min(1f, a));
-            a = a * a * (3f - 2f * a);   // কিনারা একটু মসৃণ
+            if (!maskIsAlpha) a = a * a * (3f - 2f * a);   // কিনারা একটু মসৃণ
             int p = px[i];
             int r = (int) (Color.red(p) * a + br * (1f - a));
             int g = (int) (Color.green(p) * a + bgG * (1f - a));
