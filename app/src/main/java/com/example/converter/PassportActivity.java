@@ -10,6 +10,8 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ImageDecoder;
 import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.pdf.PdfDocument;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
@@ -73,6 +75,8 @@ public class PassportActivity extends Activity {
     boolean online = false;   // true হলে remove.bg API
     boolean maskIsAlpha = false;
     EditText keyEdit;
+    Uri lastUri;          // সবশেষ সেভ করা ফাইল (শেয়ারের জন্য)
+    String lastMime;
     LinearLayout keyBox;
 
     @Override
@@ -239,13 +243,14 @@ public class PassportActivity extends Activity {
         stepper.addView(plus, new LinearLayout.LayoutParams(dp(64), -2));
         resultCard.addView(stepper);
 
+        // সারি ১: ১টা ফটো (JPG) | A4 শিট (JPG)
         LinearLayout saveRow = new LinearLayout(this);
         Button saveOne = btn("১টা ফটো সেভ", 0xFF11998E, 0xFF38EF7D);
         LinearLayout.LayoutParams s1 = new LinearLayout.LayoutParams(0, -2, 1f);
         s1.rightMargin = dp(6);
         saveOne.setLayoutParams(s1);
         saveOne.setOnClickListener(v -> saveOne());
-        Button saveSheet = btn("A4 শিট সেভ", 0xFFFF512F, 0xFFF09819);
+        Button saveSheet = btn("A4 শিট (JPG)", 0xFFFF512F, 0xFFF09819);
         LinearLayout.LayoutParams s2 = new LinearLayout.LayoutParams(0, -2, 1f);
         s2.leftMargin = dp(6);
         saveSheet.setLayoutParams(s2);
@@ -256,7 +261,25 @@ public class PassportActivity extends Activity {
         srl.topMargin = dp(14);
         resultCard.addView(saveRow, srl);
 
-        status = body("সেভ হবে: Pictures/PassportPhoto", 12);
+        // সারি ২: A4 শিট (PDF) | শেয়ার
+        LinearLayout saveRow2 = new LinearLayout(this);
+        Button savePdfBtn = btn("A4 শিট (PDF)", 0xFF8E2DE2, 0xFFE100FF);
+        LinearLayout.LayoutParams s3 = new LinearLayout.LayoutParams(0, -2, 1f);
+        s3.rightMargin = dp(6);
+        savePdfBtn.setLayoutParams(s3);
+        savePdfBtn.setOnClickListener(v -> saveSheetPdf());
+        Button shareBtn = btn("📤 শেয়ার", 0xFF00C6FF, 0xFF0072FF);
+        LinearLayout.LayoutParams s4 = new LinearLayout.LayoutParams(0, -2, 1f);
+        s4.leftMargin = dp(6);
+        shareBtn.setLayoutParams(s4);
+        shareBtn.setOnClickListener(v -> shareLast());
+        saveRow2.addView(savePdfBtn);
+        saveRow2.addView(shareBtn);
+        LinearLayout.LayoutParams srl2 = new LinearLayout.LayoutParams(-1, -2);
+        srl2.topMargin = dp(8);
+        resultCard.addView(saveRow2, srl2);
+
+        status = body("JPG: Pictures/PassportPhoto • PDF: Download/PassportPhoto", 12);
         status.setPadding(0, dp(8), 0, 0);
         resultCard.addView(status);
         root.addView(resultCard);
@@ -604,9 +627,11 @@ public class PassportActivity extends Activity {
         }).start();
     }
 
-    void toastSaved(boolean ok) {
-        status.setText(ok ? "সেভ হয়েছে: Pictures/PassportPhoto" : "সেভ করা যায়নি");
-        toast(ok ? "গ্যালারির Pictures/PassportPhoto ফোল্ডারে সেভ হয়েছে" : "সেভ করা যায়নি");
+    void toastSaved(boolean ok) { toastSavedAt(ok, "Pictures/PassportPhoto"); }
+
+    void toastSavedAt(boolean ok, String where) {
+        status.setText(ok ? "সেভ হয়েছে: " + where + " (এখন শেয়ার করতে পারো)" : "সেভ করা যায়নি");
+        toast(ok ? where + " ফোল্ডারে সেভ হয়েছে" : "সেভ করা যায়নি");
     }
 
     boolean saveJpeg(Bitmap bmp, String name) {
@@ -621,9 +646,79 @@ public class PassportActivity extends Activity {
                 if (os == null) return false;
                 bmp.compress(Bitmap.CompressFormat.JPEG, 100, os);
             }
+            lastUri = uri;
+            lastMime = "image/jpeg";
             return true;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    // ---------- PDF (A4, প্রিন্টে ঠিক মাপ আসে) ----------
+    void saveSheetPdf() {
+        if (finalPhoto == null) return;
+        clampCopies();
+        final Bitmap p = finalPhoto;
+        final int n = copies;
+        status.setText("PDF বানানো হচ্ছে…");
+        new Thread(() -> {
+            boolean ok;
+            try {
+                Bitmap sheet = buildSheet(p, n);
+                ok = savePdf(sheet, "passport_sheet_" + System.currentTimeMillis());
+                sheet.recycle();
+            } catch (Throwable t) {
+                ok = false;
+            }
+            final boolean r = ok;
+            runOnUiThread(() -> toastSavedAt(r, "Download/PassportPhoto"));
+        }).start();
+    }
+
+    boolean savePdf(Bitmap sheet, String name) {
+        PdfDocument doc = new PdfDocument();
+        try {
+            // A4 = 595 x 842 pt; শিটের ছবি পুরো পাতায় বসে, তাই 100% প্রিন্টে ৩৫×৪৫ মিমি ঠিক থাকে
+            PdfDocument.PageInfo info = new PdfDocument.PageInfo.Builder(595, 842, 1).create();
+            PdfDocument.Page page = doc.startPage(info);
+            Paint fp = new Paint(Paint.FILTER_BITMAP_FLAG);
+            page.getCanvas().drawBitmap(sheet, null, new RectF(0, 0, 595, 842), fp);
+            doc.finishPage(page);
+
+            ContentValues v = new ContentValues();
+            v.put(MediaStore.Downloads.DISPLAY_NAME, name + ".pdf");
+            v.put(MediaStore.Downloads.MIME_TYPE, "application/pdf");
+            v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/PassportPhoto");
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+            if (uri == null) return false;
+            try (OutputStream os = getContentResolver().openOutputStream(uri)) {
+                if (os == null) return false;
+                doc.writeTo(os);
+            }
+            lastUri = uri;
+            lastMime = "application/pdf";
+            return true;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            doc.close();
+        }
+    }
+
+    // ---------- শেয়ার (সবশেষ সেভ করা ফাইল) ----------
+    void shareLast() {
+        if (lastUri == null) {
+            toast("আগে সেভ করো, তারপর শেয়ার");
+            return;
+        }
+        try {
+            Intent it = new Intent(Intent.ACTION_SEND);
+            it.setType(lastMime == null ? "*/*" : lastMime);
+            it.putExtra(Intent.EXTRA_STREAM, lastUri);
+            it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(it, "শেয়ার করো"));
+        } catch (Exception e) {
+            toast("শেয়ার করা যায়নি");
         }
     }
 
