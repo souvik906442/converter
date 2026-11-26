@@ -1,4 +1,8 @@
 plugins { id 'com.android.application' }
+
+// remove.bg key: GitHub Secret (REMOVEBG_KEY) থেকে, না থাকলে -PREMOVEBG_KEY=... থেকে, না হলে খালি
+def removeBgKey = System.getenv('REMOVEBG_KEY') ?: (project.findProperty('REMOVEBG_KEY') ?: '')
+
 android {
     namespace 'com.example.converter'
     compileSdk 34
@@ -8,6 +12,10 @@ android {
         targetSdk 34
         versionCode 1
         versionName '1.0'
+        buildConfigField 'String', 'REMOVEBG_KEY', "\"${removeBgKey.trim()}\""
+    }
+    buildFeatures {
+        buildConfig true
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17

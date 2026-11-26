@@ -84,7 +84,7 @@ public class PassportActivity extends Activity {
 
         segmenter = Segmentation.getClient(new SelfieSegmenterOptions.Builder()
                 .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE).build());
-        online = getSharedPreferences("pp", MODE_PRIVATE).getBoolean("online", false);
+        online = getSharedPreferences("pp", MODE_PRIVATE).getBoolean("online", !BuildConfig.REMOVEBG_KEY.isEmpty());
 
         FrameLayout frame = new FrameLayout(this);
         frame.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
@@ -172,9 +172,11 @@ public class PassportActivity extends Activity {
         keyEdit.setSingleLine(true);
         keyEdit.setTextColor(Color.WHITE);
         keyEdit.setHintTextColor(0x88FFFFFF);
-        keyEdit.setText(getSharedPreferences("pp", MODE_PRIVATE).getString("key", ""));
+        String savedKey = getSharedPreferences("pp", MODE_PRIVATE).getString("key", "");
+        keyEdit.setText(savedKey.isEmpty() ? BuildConfig.REMOVEBG_KEY : savedKey);
+        if (!BuildConfig.REMOVEBG_KEY.isEmpty()) keyEdit.setVisibility(View.GONE); // key বিল্ডের ভেতরেই আছে
         keyBox.addView(keyEdit);
-        keyBox.addView(body("remove.bg/api থেকে ফ্রি key নাও (মাসে ৫০টা)। ইন্টারনেট লাগবে।", 12));
+        keyBox.addView(body(BuildConfig.REMOVEBG_KEY.isEmpty() ? "remove.bg/api থেকে ফ্রি key নাও (মাসে ৫০টা)। ইন্টারনেট লাগবে।" : "remove.bg key বিল্ডে বসানো আছে। ইন্টারনেট লাগবে।", 12));
         keyBox.setVisibility(online ? View.VISIBLE : View.GONE);
         c3.addView(keyBox);
         cropBtn = btn("ক্রপ করো ➜ ব্যাকগ্রাউন্ড বদলাও", 0xFF8E2DE2, 0xFFE100FF);
