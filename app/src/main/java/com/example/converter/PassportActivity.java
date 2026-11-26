@@ -405,12 +405,15 @@ public class PassportActivity extends Activity {
 
     // ---------- অনলাইন (remove.bg) ----------
     void onlineCrop() {
-        final String key = keyEdit.getText().toString().trim();
-        if (key.isEmpty()) {
+        // বিল্ডে বসানো key থাকলে সেটাই (কমা দিয়ে একাধিক key চলবে), না থাকলে ঘরে লেখা key
+        final boolean embedded = !BuildConfig.REMOVEBG_KEY.isEmpty();
+        final String keyRaw = embedded ? BuildConfig.REMOVEBG_KEY : keyEdit.getText().toString().trim();
+        final String[] keys = keyRaw.split("[,;\\s]+");
+        if (keyRaw.isEmpty() || keys.length == 0) {
             toast("আগে remove.bg API key বসাও");
             return;
         }
-        getSharedPreferences("pp", MODE_PRIVATE).edit().putString("key", key).apply();
+        if (!embedded) getSharedPreferences("pp", MODE_PRIVATE).edit().putString("key", keyRaw).apply();
         final Bitmap bmp = cropView.getCrop(photoW(), photoH());
         if (bmp == null) return;
         spin.setVisibility(View.VISIBLE);
@@ -418,10 +421,22 @@ public class PassportActivity extends Activity {
         new Thread(() -> {
             float[] m = null;
             String err = null;
-            try {
-                m = removeBgMask(bmp, key);
-            } catch (Exception e) {
-                err = (e.getMessage() != null) ? e.getMessage() : e.getClass().getSimpleName();
+            // শেষবার যে key চলেছিল সেখান থেকে শুরু; কোটা শেষ (402) / লিমিট (429) / key অচল (403) হলে পরেরটা
+            int start = getSharedPreferences("pp", MODE_PRIVATE).getInt("kidx", 0);
+            if (start < 0 || start >= keys.length) start = 0;
+            for (int n = 0; n < keys.length; n++) {
+                int i = (start + n) % keys.length;
+                try {
+                    m = removeBgMask(bmp, keys[i]);
+                    getSharedPreferences("pp", MODE_PRIVATE).edit().putInt("kidx", i).apply();
+                    err = null;
+                    break;
+                } catch (Exception e) {
+                    err = (e.getMessage() != null) ? e.getMessage() : e.getClass().getSimpleName();
+                    boolean next = err.startsWith("HTTP 402") || err.startsWith("HTTP 403") || err.startsWith("HTTP 429");
+                    if (!next) break;
+                    err = err + " (সব key চেষ্টা করা হয়েছে)";
+                }
             }
             final float[] fm = m;
             final String fe = err;
