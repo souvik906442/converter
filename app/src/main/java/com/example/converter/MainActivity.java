@@ -425,24 +425,33 @@ public class MainActivity extends Activity {
     }
 
     void styleSpinner(Spinner sp, String[] items) {
+        // নিজের TextView বানানো হলো — Samsung One UI-র থিম/ডার্ক মোড যেন লেখার রং না বদলায়
         sp.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, items) {
-            @Override
-            public View getView(int pos, View cv, ViewGroup parent) {
-                TextView t = (TextView) super.getView(pos, cv, parent);
-                t.setTextColor(Color.WHITE);
+            TextView mk(int pos, boolean drop) {
+                TextView t = new TextView(MainActivity.this);
+                t.setText(getItem(pos));
+                t.setTextColor(0xFFFFFFFF);
                 t.setTextSize(15);
+                t.setSingleLine(false);
+                t.setGravity(Gravity.CENTER_VERTICAL);
+                t.setMinHeight(dp(drop ? 48 : 40));
+                t.setForceDarkAllowed(false);
+                if (drop) t.setPadding(dp(16), dp(12), dp(16), dp(12));
+                else t.setPadding(dp(4), dp(8), dp(28), dp(8));
                 return t;
             }
 
             @Override
+            public View getView(int pos, View cv, ViewGroup parent) {
+                return mk(pos, false);
+            }
+
+            @Override
             public View getDropDownView(int pos, View cv, ViewGroup parent) {
-                TextView t = (TextView) super.getDropDownView(pos, cv, parent);
-                t.setTextColor(Color.WHITE);
-                t.setBackgroundColor(Color.TRANSPARENT);
-                t.setPadding(dp(16), dp(12), dp(16), dp(12));
-                return t;
+                return mk(pos, true);
             }
         });
+        sp.setForceDarkAllowed(false);
         sp.setBackgroundTintList(ColorStateList.valueOf(0xFFFFFFFF));
         sp.setPopupBackgroundDrawable(rounded(0xF02A2468, 0x66FFFFFF, 1, 14));
     }
