@@ -33,6 +33,7 @@ public class MainActivity extends Activity {
     static final int K_IMG = 0, K_PDF = 1, K_DOCX = 2, K_XLSX = 3, K_BAD = 4;
     final List<Uri> picked = new ArrayList<>();
     TextView status, listView;
+    LinearLayout fileList;
     Spinner fmtSpinner, unitSpinner, modeSpinner;
     int mode = 0;
     EditText sizeEdit;
@@ -105,9 +106,24 @@ public class MainActivity extends Activity {
             startActivityForResult(i, 1);
         });
         c1.addView(pick);
+        Button gallery = btn("🖼 গ্যালারি / অন্য অ্যাপ থেকে ছবি বাছাই করো", 0xFF11998E, 0xFF38EF7D);
+        gallery.setOnClickListener(v -> {
+            Intent g = new Intent(Intent.ACTION_GET_CONTENT);
+            g.addCategory(Intent.CATEGORY_OPENABLE);
+            g.setType("image/*");
+            g.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            startActivityForResult(Intent.createChooser(g, "ছবি কোথা থেকে বাছবে?"), 1);
+        });
+        c1.addView(gallery);
+        Button clearAll = btn("🗑 সব ফাইল মুছো", 0xFFFF5F6D, 0xFFFFC371);
+        clearAll.setOnClickListener(v -> { picked.clear(); showPicked(); });
+        c1.addView(clearAll);
         listView = body("কোনো ফাইল বাছাই হয়নি", 14);
         listView.setPadding(0, dp(10), 0, 0);
         c1.addView(listView);
+        fileList = new LinearLayout(this);
+        fileList.setOrientation(LinearLayout.VERTICAL);
+        c1.addView(fileList);
         root.addView(c1);
 
         // --- Format card
@@ -235,7 +251,7 @@ public class MainActivity extends Activity {
             Uri u = in.getParcelableExtra(Intent.EXTRA_STREAM);
             if (u == null && in.getClipData() != null && in.getClipData().getItemCount() > 0)
                 u = in.getClipData().getItemAt(0).getUri();
-            if (u != null) { picked.clear(); picked.add(u); }
+            if (u != null) addPicked(u);
         } else if (Intent.ACTION_SEND_MULTIPLE.equals(a)) {
             ArrayList<Uri> l = in.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
             if ((l == null || l.isEmpty()) && in.getClipData() != null) {
@@ -245,7 +261,7 @@ public class MainActivity extends Activity {
                     if (cu != null) l.add(cu);
                 }
             }
-            if (l != null && !l.isEmpty()) { picked.clear(); picked.addAll(l); }
+            if (l != null && !l.isEmpty()) { for (Uri x : l) addPicked(x); }
         } else return;
         showPicked();
     }
@@ -253,28 +269,49 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         if (req != 1 || res != RESULT_OK || data == null) return;
-        picked.clear();
+        // আগের বাছাই করা ফাইল রেখে নতুনগুলো যোগ হবে (ডুপ্লিকেট বাদ)
         if (data.getClipData() != null) {
             for (int i = 0; i < data.getClipData().getItemCount(); i++)
-                picked.add(data.getClipData().getItemAt(i).getUri());
-        } else if (data.getData() != null) picked.add(data.getData());
+                addPicked(data.getClipData().getItemAt(i).getUri());
+        } else if (data.getData() != null) addPicked(data.getData());
         showPicked();
+    }
+
+    void addPicked(Uri u) {
+        if (u != null && !picked.contains(u)) picked.add(u);
     }
 
     void showPicked() {
         crop = null;
         ops.clear();
         updateCropLabel();
+        fileList.removeAllViews();
         if (picked.isEmpty()) { listView.setText("কোনো ফাইল বাছাই হয়নি"); return; }
-        StringBuilder sb = new StringBuilder(picked.size() + "টি ফাইল বাছাই হয়েছে:");
-        for (Uri u : picked) {
-            sb.append("\n• ").append(displayName(u));
+        listView.setText(picked.size() + "টি ফাইল বাছাই হয়েছে (ভুল ফাইল বাদ দিতে ✕ চাপো):");
+        for (int idx = 0; idx < picked.size(); idx++) {
+            final Uri u = picked.get(idx);
+            String line = "• " + displayName(u);
             if (kind(u) == K_IMG) {
                 int[] d = imageSize(u);
-                if (d != null) sb.append("  —  ").append(d[0]).append(" × ").append(d[1]).append(" px");
+                if (d != null) line += "  —  " + d[0] + " × " + d[1] + " px";
             }
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            TextView name = body(line, 14);
+            row.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            TextView x = new TextView(this);
+            x.setText("✕");
+            x.setTextSize(18);
+            x.setTextColor(0xFFFF6B6B);
+            x.setTypeface(Typeface.DEFAULT_BOLD);
+            x.setGravity(android.view.Gravity.CENTER);
+            x.setPadding(dp(14), dp(8), dp(14), dp(8));
+            x.setOnClickListener(v -> { picked.remove(u); showPicked(); });
+            row.addView(x);
+            row.setPadding(0, dp(2), 0, dp(2));
+            fileList.addView(row);
         }
-        listView.setText(sb.toString());
     }
 
     /** Image pixel size (width, height) with EXIF rotation applied, or null if unknown. */
